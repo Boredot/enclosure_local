@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Enclosure — 2P</title>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   :root{
     --blue:#3b82f6; --red:#ef4444;
@@ -57,7 +56,7 @@
   .link-line{font-size:12px;color:var(--muted);word-break:break-all}
   textarea.code{width:100%;min-height:96px;background:#0d1120;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:10px;font-size:11px;font-family:ui-monospace,monospace;word-break:break-all;resize:vertical;}
   .step-label{font-size:13px;font-weight:700}
-  .status-line{font-size:13px;color:var(--muted);min-height:18px}
+  .status-line{font-size:13px;color:var(--muted);min-height:18px;line-height:1.45}
   details{border-top:1px solid var(--line);padding-top:10px}
   summary{cursor:pointer;font-weight:700;font-size:13px}
   details ul{margin:8px 0 0 18px;padding:0;color:var(--muted);font-size:12px;line-height:1.5}
@@ -93,32 +92,32 @@
     <h2>Play</h2>
     <button id="local-btn" class="big primary">Local match (same device)</button>
 
-    <h3>Online — no server (works anywhere)</h3>
-    <button id="host-manual-btn" class="big">Host game · copy-paste codes</button>
-    <button id="join-manual-btn" class="big">Join game · paste invite code</button>
-
-    <h3>Online — matchmaking server (PeerJS)</h3>
-    <button id="host-btn" class="big">Host with room code</button>
+    <h3>Online — room code (recommended)</h3>
+    <button id="host-btn" class="big">Host game · get room code</button>
     <div class="join-row">
       <input id="join-code" placeholder="ROOM CODE" maxlength="8" autocomplete="off" spellcheck="false" />
       <button id="join-btn" class="primary">Join</button>
     </div>
 
+    <h3>Online — copy-paste codes (backup)</h3>
+    <button id="host-manual-btn" class="big">Host game · copy-paste codes</button>
+    <button id="join-manual-btn" class="big">Join game · paste invite code</button>
+
     <p class="error" id="home-error"></p>
-    <p class="hint">If the matchmaking server is blocked on your network, use the copy-paste mode: exchange two codes through any messenger and the game connects directly (P2P). Host = Blue, guest = Red.</p>
+    <p class="hint">Room-code mode connects through public Nostr relays (ordinary encrypted web traffic) and usually works even where many services are blocked. Copy-paste mode connects directly with zero third parties, but needs a route between the two devices. Host = Blue, guest = Red.</p>
   </div>
 </section>
 
-<!-- ===== HOST LOBBY (PeerJS) ===== -->
+<!-- ===== ROOM-CODE LOBBY ===== -->
 <section id="lobby-view" class="center-screen" hidden>
   <div class="card">
-    <h2>Waiting for opponent…</h2>
+    <h2 id="lobby-title">Waiting for opponent…</h2>
     <div class="room-code" id="lobby-code">·····</div>
-    <p class="link-line" id="lobby-link"></p>
-    <div class="btns">
-      <button id="copy-link-btn" class="primary">Copy invite link</button>
-      <button id="cancel-host-btn">Cancel</button>
+    <div id="lobby-link-wrap">
+      <p class="link-line" id="lobby-link"></p>
+      <div class="btns"><button id="copy-link-btn" class="primary">Copy invite link</button></div>
     </div>
+    <div class="btns"><button id="cancel-host-btn">Cancel</button></div>
     <p class="error" id="lobby-error"></p>
   </div>
 </section>
@@ -391,44 +390,29 @@ function winner(){
 const en=s=>Number.isInteger(s)?String(s):s.toFixed(2).replace(/0+$/,"").replace(/\.$/,"");
 
 /* ================= networking ================= */
-/* Many STUN servers: if Google's are blocked, others may still work. */
-const rtcConfig={iceServers:[
-  {urls:"stun:stun.l.google.com:19302"},
-  {urls:"stun:stun1.l.google.com:19302"},
-  {urls:"stun:stun.nextcloud.com:443"},
-  {urls:"stun:stun.sipgate.net:3478"},
-  {urls:"stun:stun.aa.net.uk:3478"},
-  {urls:"stun:stun.miwifi.com:3478"},
-  {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
-  {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
-  {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
-]};
 const ALPHABET="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const genCode=()=>Array.from({length:5},()=>ALPHABET[Math.floor(Math.random()*ALPHABET.length)]).join("");
-const ID_PREFIX="enclosure-v1-";
 const inviteLink=code=>location.href.split("?")[0].split("#")[0]+"?room="+code;
 
-let net={peer:null,conn:null,role:null,myColor:null,roomCode:"",transport:"",connected:false};
-let rtc={pc:null,dc:null};
-const netOK=()=>net.conn&&net.conn.open;
+let net={conn:null,room:null,peerId:null,send:null,role:null,myColor:null,roomCode:"",transport:"",
+         connected:false,pc:null,dc:null,who:"",candStats:null,manualTimer:0};
+const netOK=()=>net.connected;
 
 function cleanupNet(){
+  if(net.manualTimer)clearTimeout(net.manualTimer);
   try{net.conn&&net.conn.close&&net.conn.close();}catch(e){}
-  try{net.peer&&net.peer.destroy&&net.peer.destroy();}catch(e){}
-  try{rtc.dc&&rtc.dc.close();}catch(e){}
-  try{rtc.pc&&rtc.pc.close();}catch(e){}
-  rtc={pc:null,dc:null};
-  net={peer:null,conn:null,role:null,myColor:null,roomCode:"",transport:"",connected:false};
+  try{net.room&&net.room.leave&&net.room.leave();}catch(e){}
+  try{net.dc&&net.dc.close();}catch(e){}
+  try{net.pc&&net.pc.close();}catch(e){}
+  net={conn:null,room:null,peerId:null,send:null,role:null,myColor:null,roomCode:"",transport:"",
+       connected:false,pc:null,dc:null,who:"",candStats:null,manualTimer:0};
 }
-function friendlyPeerError(err){
-  switch(err&&err.type){
-    case"peer-unavailable":return"Room not found. Check the code (or the host closed the game).";
-    case"network":case"server-error":case"socket-error":case"socket-closed":return"Can't reach the matchmaking server. Try the copy-paste mode instead.";
-    case"browser-incompatible":return"This browser doesn't support WebRTC.";
-    default:return(err&&err.message)||"Connection error.";
-  }
+function netSend(obj){
+  if(!net.connected)return;
+  if(net.transport==="trystero"){net.send&&net.send(obj);return;}
+  if(net.conn&&net.conn.open)net.conn.send(obj);
 }
-function attachConnection(conn){
+function attachConnection(conn){ /* raw WebRTC DataChannel wrapper path */
   net.conn=conn;
   conn.on("open",()=>{
     net.connected=true;
@@ -443,11 +427,11 @@ function attachConnection(conn){
 function onNetData(d){
   if(net.role==="host"){
     if(d.t==="move"){
-      try{state=applyMove(state,d.from,d.to);error="";selected=null;render();net.conn.send({t:"state",state});}
-      catch(e){net.conn.send({t:"reject",reason:e.message});}
+      try{state=applyMove(state,d.from,d.to);error="";selected=null;render();netSend({t:"state",state});}
+      catch(e){netSend({t:"reject",reason:e.message});}
     }else if(d.t==="pass"){
-      try{state=applyPass(state);error="";selected=null;render();net.conn.send({t:"state",state});}
-      catch(e){net.conn.send({t:"reject",reason:e.message});}
+      try{state=applyPass(state);error="";selected=null;render();netSend({t:"state",state});}
+      catch(e){netSend({t:"reject",reason:e.message});}
     }
   }else{
     if(d.t==="state"){state=d.state;selected=null;hover=null;error="";render();}
@@ -455,68 +439,108 @@ function onNetData(d){
   }
 }
 
-/* --- PeerJS (matchmaking server) --- */
-let hostAttempts=0;
-function startHost(){
-  if(typeof Peer==="undefined"){document.getElementById("home-error").textContent="PeerJS failed to load. Use the copy-paste mode instead.";return;}
-  cleanupNet();mode="online";state=initialState();history=[];selected=null;hover=null;error="";
-  net.role="host";net.myColor="blue";net.transport="peerjs";
-  showView("lobby");
+/* --- Room-code mode: Trystero over Nostr relays --- */
+const APP_ID="enclosure-sst1-v1";
+const RELAYS=[
+  "wss://relay.damus.io","wss://nos.lol","wss://relay.nostr.band","wss://nostr.mom",
+  "wss://relay.snort.social","wss://offchain.pub","wss://relay.primal.net","wss://nostr.wine"
+];
+const TRYSTERO_SOURCES=[
+  "https://unpkg.com/trystero/dist/trystero-nostr.min.js",
+  "https://cdn.jsdelivr.net/npm/trystero/dist/trystero-nostr.min.js"
+];
+let trysteroMod=null;
+async function loadTrystero(){
+  if(trysteroMod)return trysteroMod;
+  let lastErr=null;
+  for(const url of TRYSTERO_SOURCES){
+    try{trysteroMod=await import(url);return trysteroMod;}catch(e){lastErr=e;}
+  }
+  throw lastErr||new Error("Could not load Trystero");
+}
+function setupTrystero(room){
+  const [sendState,onState]=room.makeAction("state");
+  const [sendMove,onMove]=room.makeAction("move");
+  const [sendPass,onPass]=room.makeAction("pass");
+  const [sendReject,onReject]=room.makeAction("reject");
+  net.send=obj=>{
+    try{
+      if(obj.t==="state")sendState(obj.state);
+      else if(obj.t==="move")sendMove({from:obj.from,to:obj.to});
+      else if(obj.t==="pass")sendPass({});
+      else if(obj.t==="reject")sendReject({reason:obj.reason});
+    }catch(e){}
+  };
+  onState(d=>onNetData({t:"state",state:d}));
+  onMove(d=>onNetData({t:"move",from:d.from,to:d.to}));
+  onPass(()=>onNetData({t:"pass"}));
+  onReject(d=>onNetData({t:"reject",reason:d.reason}));
+  room.onPeerJoin(peerId=>{
+    if(net.connected)return; /* one opponent only */
+    net.connected=true;net.peerId=peerId;
+    if(net.role==="host")net.send({t:"state",state});
+    enterGame();render();
+  });
+  room.onPeerLeave(peerId=>{
+    if(peerId&&net.peerId&&peerId!==net.peerId)return;
+    net.connected=false;error="Opponent disconnected.";render();
+  });
+}
+function setLobbyFor(kind,code){
+  document.getElementById("lobby-title").textContent=kind==="host"?"Waiting for opponent…":"Connecting to room…";
+  document.getElementById("lobby-code").textContent=code;
+  document.getElementById("lobby-link-wrap").hidden=(kind!=="host");
+  document.getElementById("lobby-link").textContent=inviteLink(code);
   document.getElementById("lobby-error").textContent="";
-  tryHost();
 }
-function tryHost(){
+async function startHost(){
+  cleanupNet();resetGameForOnline();
+  net.role="host";net.myColor="blue";net.transport="trystero";
   const code=genCode();net.roomCode=code;
-  const peer=new Peer(ID_PREFIX+code,{config:rtcConfig});
-  net.peer=peer;
-  peer.on("open",()=>{
-    hostAttempts=0;
-    document.getElementById("lobby-code").textContent=code;
-    document.getElementById("lobby-link").textContent=inviteLink(code);
-  });
-  peer.on("connection",conn=>{
-    if(netOK()){try{conn.close();}catch(e){}return;}
-    attachConnection(conn);
-  });
-  peer.on("disconnected",()=>{try{peer.reconnect();}catch(e){}});
-  peer.on("error",err=>{
-    if(err.type==="unavailable-id"&&hostAttempts<5){hostAttempts++;try{peer.destroy();}catch(e){}tryHost();return;}
-    document.getElementById("lobby-error").textContent=friendlyPeerError(err);
-  });
+  showView("lobby");setLobbyFor("host",code);
+  try{
+    const {joinRoom}=await loadTrystero();
+    const room=joinRoom({appId:APP_ID,relayUrls:RELAYS},code);
+    net.room=room;setupTrystero(room);
+  }catch(e){
+    document.getElementById("lobby-error").textContent="Could not load the relay library (CDN may be blocked). Try the copy-paste mode instead.";
+  }
 }
-let joinTimer=null;
-function joinRoom(raw){
+async function joinRoomByCode(raw){
   const code=(raw||"").trim().toUpperCase();
   if(!code)return;
-  if(typeof Peer==="undefined"){document.getElementById("home-error").textContent="PeerJS failed to load. Use the copy-paste mode instead.";return;}
-  cleanupNet();mode="online";state=initialState();history=[];selected=null;hover=null;error="";
-  net.role="guest";net.myColor="red";net.roomCode=code;net.transport="peerjs";
-  const joinBtn=document.getElementById("join-btn");joinBtn.disabled=true;
-  document.getElementById("home-error").textContent="Connecting…";
-  const peer=new Peer(undefined,{config:rtcConfig});
-  net.peer=peer;
-  peer.on("open",()=>{
-    const conn=peer.connect(ID_PREFIX+code,{reliable:true});
-    attachConnection(conn);
-    joinTimer=setTimeout(()=>{
-      if(!net.connected){
-        document.getElementById("home-error").textContent="Could not reach that room. The host may have left.";
-        cleanupNet();mode=null;joinBtn.disabled=false;showView("home");
-      }
-    },15000);
-  });
-  peer.on("error",err=>{
-    if(net.connected)return;
-    clearTimeout(joinTimer);
-    document.getElementById("home-error").textContent=friendlyPeerError(err);
-    cleanupNet();mode=null;joinBtn.disabled=false;showView("home");
-  });
+  cleanupNet();resetGameForOnline();
+  net.role="guest";net.myColor="red";net.transport="trystero";net.roomCode=code;
+  showView("lobby");setLobbyFor("guest",code);
+  try{
+    const {joinRoom}=await loadTrystero();
+    const room=joinRoom({appId:APP_ID,relayUrls:RELAYS},code);
+    net.room=room;setupTrystero(room);
+    setTimeout(()=>{
+      if(!net.connected&&!lobbyView.hidden)
+        document.getElementById("lobby-error").textContent="Still searching for the host… Make sure the code is correct and the host keeps their page open.";
+    },20000);
+  }catch(e){
+    document.getElementById("lobby-error").textContent="Could not load the relay library (CDN may be blocked). Try the copy-paste mode instead.";
+  }
 }
 
 /* --- Manual WebRTC (no server at all) --- */
+const ICE_SERVERS={iceServers:[
+  {urls:"stun:stun.l.google.com:19302"},
+  {urls:"stun:stun1.l.google.com:19302"},
+  {urls:"stun:stun.nextcloud.com:443"},
+  {urls:"stun:stun.sipgate.net:3478"},
+  {urls:"stun:stun.aa.net.uk:3478"},
+  {urls:"stun:stun.miwifi.com:3478"},
+  {urls:"stun:global.stun.twilio.com:3478"},
+  {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
+]};
 const packDesc=d=>btoa(JSON.stringify(d));
 const unpackDesc=s=>JSON.parse(atob(s.trim()));
-function waitIceComplete(pc,ms=4000){
+function waitIceComplete(pc,ms=12000){
   if(pc.iceGatheringState==="complete")return Promise.resolve();
   return new Promise(res=>{
     const t=setTimeout(res,ms);
@@ -525,17 +549,32 @@ function waitIceComplete(pc,ms=4000){
     });
   });
 }
+function trackCandidates(pc){
+  const stats={total:0,host:0,srflx:0,relay:0};
+  pc.addEventListener("icecandidate",e=>{
+    if(!e.candidate)return;
+    stats.total++;
+    const t=e.candidate.type||"";
+    if(t==="host")stats.host++;
+    else if(t==="srflx"||t==="prflx")stats.srflx++;
+    else if(t==="relay")stats.relay++;
+  });
+  return stats;
+}
 function newPC(){
-  const pc=new RTCPeerConnection(rtcConfig);
-  pc.oniceconnectionstatechange=()=>{
-    if(net.transport==="webrtc"&&net.connected&&
-       (pc.iceConnectionState==="failed"||pc.iceConnectionState==="disconnected")){
-      net.connected=false;error="Connection lost.";render();
+  const pc=new RTCPeerConnection(ICE_SERVERS);
+  pc.addEventListener("connectionstatechange",()=>{
+    if(net.transport!=="webrtc")return;
+    if(pc.connectionState==="failed"){
+      net.connected=false;
+      const el=net.who==="host"?document.getElementById("hm-status"):document.getElementById("jm-status");
+      if(el)el.textContent="Connection failed — no route could be established between the two devices. Try the room-code mode instead.";
+      render();
     }
-  };
+  });
   return pc;
 }
-/* Wrap a raw RTCDataChannel with the same API as a PeerJS connection. */
+/* Wrap a raw RTCDataChannel with a PeerJS-like API. */
 function wrapDC(dc){
   const h={data:[],close:[],open:[],error:[]};
   const obj={
@@ -557,65 +596,74 @@ function resetGameForOnline(){
 }
 async function startHostManual(){
   cleanupNet();resetGameForOnline();
-  net.role="host";net.myColor="blue";net.transport="webrtc";net.roomCode="direct";
+  net.role="host";net.myColor="blue";net.transport="webrtc";net.roomCode="direct";net.who="host";
   const inv=document.getElementById("hm-invite"),
         ans=document.getElementById("hm-answer"),
         st=document.getElementById("hm-status");
-  inv.value="";ans.value="";st.textContent="Creating invite code…";
+  inv.value="";ans.value="";st.textContent="Creating invite code… (this can take up to ~12s while network candidates are gathered)";
   showView("host-manual");
   try{
-    const pc=newPC();rtc.pc=pc;
-    const dc=pc.createDataChannel("enc",{ordered:true});rtc.dc=dc;
+    const pc=newPC();net.pc=pc;
+    net.candStats=trackCandidates(pc);
+    const dc=pc.createDataChannel("enc",{ordered:true});net.dc=dc;
     attachConnection(wrapDC(dc));
     await pc.setLocalDescription(await pc.createOffer());
-    await waitIceComplete(pc);
+    await waitIceComplete(pc,12000);
     inv.value=packDesc(pc.localDescription);
-    st.textContent="Step 1: send the invite code above to your friend (any messenger). Step 2: paste their reply below and press Connect.";
+    let warn="";
+    if(net.candStats.total===0)warn="⚠ No network candidates could be gathered (STUN/TURN likely blocked on your network). This code will probably only work on the same local network. ";
+    st.textContent=warn+"Step 1: send the invite code above to your friend (any messenger). Step 2: paste their reply below and press Connect.";
   }catch(e){
     st.textContent="Could not create invite code: "+(e.message||e);
   }
 }
 async function applyManualAnswer(){
   const ans=document.getElementById("hm-answer"),st=document.getElementById("hm-status");
+  if(!net.pc){st.textContent="No pending invite. Press Cancel and start again.";return;}
   try{
     const desc=unpackDesc(ans.value);
-    await rtc.pc.setRemoteDescription(desc);
+    await net.pc.setRemoteDescription(desc);
     st.textContent="Connecting… the game opens automatically.";
+    if(net.manualTimer)clearTimeout(net.manualTimer);
+    net.manualTimer=setTimeout(()=>{
+      if(!net.connected)st.textContent="Still not connected after 20s. The reply may have carried no usable network candidates. If it keeps hanging, use the room-code mode instead.";
+    },20000);
   }catch(e){
-    st.textContent="That reply code is invalid. Ask your friend to copy it again.";
+    st.textContent="That reply code is invalid or incomplete. Ask your friend to copy it again.";
   }
 }
 async function createManualReply(){
   cleanupNet();resetGameForOnline();
-  net.role="guest";net.myColor="red";net.transport="webrtc";net.roomCode="direct";
+  net.role="guest";net.myColor="red";net.transport="webrtc";net.roomCode="direct";net.who="guest";
   const inv=document.getElementById("jm-invite"),
         reply=document.getElementById("jm-reply"),
         wrap=document.getElementById("jm-reply-wrap"),
         st=document.getElementById("jm-status");
-  reply.value="";wrap.hidden=true;st.textContent="Creating reply code…";
+  reply.value="";wrap.hidden=true;st.textContent="Creating reply code… (this can take up to ~12s while network candidates are gathered)";
+  showView("join-manual");
   try{
     const offer=unpackDesc(inv.value);
-    const pc=newPC();rtc.pc=pc;
-    pc.ondatachannel=e=>{rtc.dc=e.channel;attachConnection(wrapDC(e.channel));};
+    const pc=newPC();net.pc=pc;
+    net.candStats=trackCandidates(pc);
+    pc.ondatachannel=e=>{net.dc=e.channel;attachConnection(wrapDC(e.channel));};
     await pc.setRemoteDescription(offer);
     await pc.setLocalDescription(await pc.createAnswer());
-    await waitIceComplete(pc);
+    await waitIceComplete(pc,12000);
     reply.value=packDesc(pc.localDescription);
     wrap.hidden=false;
-    st.textContent="Send this reply code back to the host. You'll enter the game automatically once they accept it.";
+    let warn="";
+    if(net.candStats.total===0)warn="⚠ No network candidates could be gathered on your side — the connection may only work if you're on the same network. ";
+    st.textContent=warn+"Send this reply code back to the host. You'll enter the game automatically once they accept it.";
   }catch(e){
-    st.textContent="That invite code is invalid. Ask the host to copy it again.";
+    st.textContent="That invite code is invalid or incomplete. Ask the host to copy it again.";
   }
 }
 function copyText(btn,text){
   const done=()=>{const old=btn.textContent;btn.textContent="Copied!";setTimeout(()=>btn.textContent=old,1500);};
-  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(()=>{btn.previousElementSibling?.select?.();});}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(()=>{});}
 }
-
 function leaveOnline(){
-  clearTimeout(joinTimer);
   cleanupNet();mode=null;state=initialState();history=[];selected=null;hover=null;error="";
-  document.getElementById("join-btn").disabled=false;
   document.getElementById("home-error").textContent="";
   showView("home");
 }
@@ -633,7 +681,10 @@ function showView(v){
   joinManualView.hidden=v!=="join-manual";
   gameView.hidden=v!=="game";
 }
-function enterGame(){showView("game");document.getElementById("net-bar").hidden=(mode!=="online");render();}
+function enterGame(){
+  if(net.manualTimer)clearTimeout(net.manualTimer);
+  showView("game");document.getElementById("net-bar").hidden=(mode!=="online");render();
+}
 
 let mode=null; /* 'local' | 'online' */
 let state=initialState(),history=[],selected=null,hover=null,error="";
@@ -675,9 +726,9 @@ svg.addEventListener("click",e=>{
     state=applyMove(state,selected,p);selected=null;hover=null;error="";
   }else if(net.role==="host"){
     state=applyMove(state,selected,p);selected=null;hover=null;error="";
-    netOK()&&net.conn.send({t:"state",state});
-  }else{
-    netOK()&&net.conn.send({t:"move",from:selected,to:p});
+    netSend({t:"state",state});
+  }else{ /* guest: send, host validates & echoes state */
+    netSend({t:"move",from:selected,to:p});
     selected=null;error="";
   }
   render();
@@ -773,15 +824,15 @@ function updateHUD(){
 /* ================= buttons ================= */
 document.getElementById("local-btn").addEventListener("click",startLocal);
 document.getElementById("host-btn").addEventListener("click",startHost);
-document.getElementById("join-btn").addEventListener("click",()=>joinRoom(document.getElementById("join-code").value));
-document.getElementById("join-code").addEventListener("keydown",e=>{if(e.key==="Enter")joinRoom(e.target.value);});
+document.getElementById("join-btn").addEventListener("click",()=>joinRoomByCode(document.getElementById("join-code").value));
+document.getElementById("join-code").addEventListener("keydown",e=>{if(e.key==="Enter")joinRoomByCode(e.target.value);});
 document.getElementById("cancel-host-btn").addEventListener("click",leaveOnline);
 document.getElementById("leave-btn").addEventListener("click",leaveOnline);
 
 /* manual mode buttons */
 document.getElementById("host-manual-btn").addEventListener("click",startHostManual);
 document.getElementById("join-manual-btn").addEventListener("click",()=>{
-  cleanupNet();document.getElementById("jm-invite").value="";
+  document.getElementById("jm-invite").value="";
   document.getElementById("jm-reply-wrap").hidden=true;
   document.getElementById("jm-status").textContent="Paste the host's invite code above.";
   showView("join-manual");
@@ -799,8 +850,8 @@ document.getElementById("copy-link-game-btn").addEventListener("click",function(
 document.getElementById("pass-btn").addEventListener("click",()=>{
   if(!myTurn())return;
   if(mode==="local"){history.push(clone(state));state=applyPass(state);selected=null;hover=null;error="";}
-  else if(net.role==="host"){try{state=applyPass(state);error="";netOK()&&net.conn.send({t:"state",state});}catch(e){error=e.message;}}
-  else{netOK()&&net.conn.send({t:"pass"});}
+  else if(net.role==="host"){try{state=applyPass(state);error="";netSend({t:"state",state});}catch(e){error=e.message;}}
+  else{netSend({t:"pass"});}
   selected=null;render();
 });
 document.getElementById("undo-btn").addEventListener("click",()=>{
@@ -809,7 +860,7 @@ document.getElementById("undo-btn").addEventListener("click",()=>{
 });
 function newGame(){
   state=initialState();history=[];selected=null;hover=null;error="";
-  if(mode==="online"&&net.role==="host"&&netOK())net.conn.send({t:"state",state});
+  if(mode==="online"&&net.role==="host")netSend({t:"state",state});
   render();
 }
 document.getElementById("reset-btn").addEventListener("click",()=>{
