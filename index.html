@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Enclosure — 2P</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --blue:#3b82f6; --red:#ef4444;
+    --bg:#0b0e14; --panel:#141926; --line:#232b3d; --text:#e6ebf5; --muted:#8b96ad;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  header{padding:14px 18px;display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);}
+  header h1{font-size:20px;margin:0}
+  header .sub{color:var(--muted);font-size:13px}
+  .layout{display:flex;flex-wrap:wrap;gap:16px;padding:16px;max-width:1060px;margin:0 auto;align-items:flex-start;}
+  .board-wrap{position:relative;flex:1 1 480px;max-width:620px;}
+  svg#board{width:100%;height:auto;display:block;border-radius:12px;background:#0d1120;border:1px solid var(--line);touch-action:manipulation;}
+  .panel{flex:1 1 280px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .badge{padding:4px 10px;border-radius:999px;font-weight:700;font-size:14px;}
+  .badge.blue{background:rgba(59,130,246,.15);color:var(--blue);border:1px solid var(--blue);}
+  .badge.red{background:rgba(239,68,68,.15);color:var(--red);border:1px solid var(--red);}
+  .scores{display:flex;gap:10px;}
+  .score{flex:1;background:#0d1120;border:1px solid var(--line);border-radius:10px;padding:10px;}
+  .score .name{font-weight:700;font-size:13px}
+  .score.blue .name{color:var(--blue)} .score.red .name{color:var(--red)}
+  .score .val{font-size:24px;font-weight:800}
+  .score .gain{color:var(--muted);font-size:12px}
+  button{cursor:pointer;border:1px solid var(--line);background:#1b2233;color:var(--text);padding:9px 12px;border-radius:9px;font-size:14px;}
+  button:hover{filter:brightness(1.15)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.primary{background:#243049}
+  button.warn{background:#3a2230;border-color:#5c2b3a}
+  button.big{font-size:16px;padding:13px 18px;width:100%}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .error{color:#ff8f8f;min-height:18px;font-size:13px}
+  .hint{color:var(--muted);font-size:12px;line-height:1.45}
+  .meta{color:var(--muted);font-size:12px}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,14,.72);border-radius:12px;}
+  .overlay .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 26px;text-align:center;max-width:320px;}
+  .overlay h2{margin:0 0 6px}
+  .overlay .final{margin:8px 0 14px;color:var(--muted)}
+  .net-bar{flex-basis:100%;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;}
+  .net-bar .grow{flex:1;font-size:13px;color:var(--muted)}
+  .net-bar code{color:var(--text);font-weight:700}
+  .center-screen{max-width:460px;margin:40px auto;padding:0 16px;display:flex;flex-direction:column;gap:16px;}
+  .center-screen .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px;}
+  .center-screen h2{margin:0;font-size:22px}
+  .join-row{display:flex;gap:8px}
+  .join-row input{flex:1;background:#0d1120;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:10px 12px;font-size:16px;text-transform:uppercase;letter-spacing:2px;}
+  .room-code{font-size:34px;font-weight:800;letter-spacing:6px;text-align:center;color:var(--text);background:#0d1120;border:1px dashed var(--line);border-radius:10px;padding:12px;}
+  .link-line{font-size:12px;color:var(--muted);word-break:break-all}
+  details{border-top:1px solid var(--line);padding-top:10px}
+  summary{cursor:pointer;font-weight:700;font-size:13px}
+  details ul{margin:8px 0 0 18px;padding:0;color:var(--muted);font-size:12px;line-height:1.5}
+  /* board art */
+  .board-background{fill:#0d1120}
+  .grid{stroke:#1c2436;stroke-width:1}
+  .territory{opacity:.20}
+  .territory.blue{fill:var(--blue)} .territory.red{fill:var(--red)}
+  .range-square{fill:rgba(255,255,255,.05);stroke:rgba(255,255,255,.25);stroke-dasharray:4 4;stroke-width:1}
+  .segment{stroke-width:3;stroke-linecap:round}
+  .segment.blue{stroke:var(--blue)} .segment.red{stroke:var(--red)}
+  .segment.invincible{stroke-width:3.5}
+  .segment-halo{stroke-width:10;stroke-linecap:round;opacity:.30}
+  .segment-halo.blue{stroke:var(--blue)} .segment-halo.red{stroke:var(--red)}
+  .preview{stroke-width:2.5;stroke-dasharray:6 5;stroke-linecap:round;opacity:.85}
+  .preview.blue{stroke:var(--blue)} .preview.red{stroke:var(--red)}
+  .preview.invalid{stroke:#ff5f5f}
+  .node{stroke:#0d1120;stroke-width:1}
+  .node.blue{fill:var(--blue)} .node.red{fill:var(--red)}
+  .node.selectable{stroke:#fff;stroke-width:1.5}
+  .selection{fill:none;stroke:#fff;stroke-width:2}
+</style>
+</head>
+<body>
+<header>
+  <h1>Enclosure</h1>
+  <span class="sub">Line-cutting territory game · local &amp; online 2-player</span>
+</header>
+
+<!-- ===== HOME / MODE SELECT ===== -->
+<section id="home-view" class="center-screen">
+  <div class="card">
+    <h2>Play</h2>
+    <button id="local-btn" class="big primary">Local match (same device)</button>
+    <button id="host-btn" class="big">Host online game</button>
+    <div class="join-row">
+      <input id="join-code" placeholder="ROOM CODE" maxlength="8" autocomplete="off" spellcheck="false" />
+      <button id="join-btn" class="primary">Join</button>
+    </div>
+    <p class="error" id="home-error"></p>
+    <p class="hint">Online games connect peer-to-peer (WebRTC). Host = Blue, guest = Red. No accounts needed — just share the room code or invite link.</p>
+  </div>
+</section>
+
+<!-- ===== HOST LOBBY ===== -->
+<section id="lobby-view" class="center-screen" hidden>
+  <div class="card">
+    <h2>Waiting for opponent…</h2>
+    <div class="room-code" id="lobby-code">·····</div>
+    <p class="link-line" id="lobby-link"></p>
+    <div class="btns">
+      <button id="copy-link-btn" class="primary">Copy invite link</button>
+      <button id="cancel-host-btn">Cancel</button>
+    </div>
+    <p class="error" id="lobby-error"></p>
+  </div>
+</section>
+
+<!-- ===== GAME ===== -->
+<div id="game-view" class="layout" hidden>
+  <div class="net-bar" id="net-bar" hidden>
+    <span class="grow" id="net-info"></span>
+    <button id="copy-link-game-btn">Copy invite</button>
+    <button id="leave-btn" class="warn">Leave</button>
+  </div>
+  <div class="board-wrap">
+    <svg id="board" viewBox="0 0 552 552" aria-label="Enclosure board"></svg>
+    <div id="overlay" class="overlay hidden">
+      <div class="card">
+        <h2 id="ov-title">Game over</h2>
+        <div class="final" id="ov-score"></div>
+        <button class="primary" id="ov-reset">Play again</button>
+        <p class="meta" id="ov-wait" hidden>Waiting for the host to start a new game…</p>
+      </div>
+    </div>
+  </div>
+
+  <aside class="panel">
+    <div class="row"><span class="meta">Turn</span><span id="turn-badge" class="badge blue">Blue</span></div>
+    <div class="row"><span class="meta">Edges used</span><span id="move-count" class="meta">0 / 120</span></div>
+    <div class="row"><span class="meta">Lines left this turn</span><span id="lines-left" class="meta">1</span></div>
+
+    <div class="scores">
+      <div class="score blue">
+        <div class="name" id="blue-name">Blue</div>
+        <div class="val" id="blue-score">0</div>
+        <div class="gain" id="blue-gain">+0 this turn</div>
+      </div>
+      <div class="score red">
+        <div class="name" id="red-name">Red</div>
+        <div class="val" id="red-score">0</div>
+        <div class="gain" id="red-gain">+0 this turn</div>
+      </div>
+    </div>
+
+    <div class="btns">
+      <button id="pass-btn" class="warn" title="Ends your turn now but spends your remaining line slots">Pass / end turn</button>
+      <button id="undo-btn">Undo</button>
+      <button id="reset-btn">Reset</button>
+    </div>
+
+    <div class="error" id="error"></div>
+    <div class="hint" id="hint">Click one of your glowing nodes, then click a point within the box to draw a line.</div>
+
+    <details>
+      <summary>Rules</summary>
+      <ul>
+        <li>Draw from one of your nodes to any point within a ±3 box in x and y.</li>
+        <li>Up to 2 lines per turn (Blue gets only 1 on the very first turn).</li>
+        <li>Crossing a vulnerable enemy line cuts it (max 1 cut per line). Orphaned enemy nodes are removed.</li>
+        <li>Lines you place this turn are <b>invincible</b> until your turn ends.</li>
+        <li>You may not overlap your own lines, put nodes on your own edges, or run edges through your own nodes.</li>
+        <li>At the end of every turn, each player's enclosed area is added to their score.</li>
+        <li>After 120 edge-slots are used, the higher score wins.</li>
+      </ul>
+    </details>
+  </aside>
+</div>
+
+<script>
+"use strict";
+/* ================= geometry (ported from game) ================= */
+const EPS=1e-9;
+const round=s=>Math.round(s/EPS)*EPS;
+const pkey=([x,y])=>`${Math.round(x/EPS)},${Math.round(y/EPS)}`;
+const peq=(a,b)=>Math.abs(a[0]-b[0])<EPS&&Math.abs(a[1]-b[1])<EPS;
+const segEq=(s,f)=>(peq(s.from,f.from)&&peq(s.to,f.to))||(peq(s.from,f.to)&&peq(s.to,f.from));
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1]];
+const cross=(a,b)=>a[0]*b[1]-a[1]*b[0];
+function onSeg(p,seg){
+  const d=sub(seg.to,seg.from),r=sub(p,seg.from);
+  return Math.abs(cross(r,d))<EPS&&
+    p[0]>=Math.min(seg.from[0],seg.to[0])-EPS&&p[0]<=Math.max(seg.from[0],seg.to[0])+EPS&&
+    p[1]>=Math.min(seg.from[1],seg.to[1])-EPS&&p[1]<=Math.max(seg.from[1],seg.to[1])+EPS;
+}
+function intersect(s,f){
+  const b=s.from,r=f.from,v=sub(s.to,b),A=sub(f.to,r),M=cross(v,A),Z=sub(r,b);
+  if(Math.abs(M)<EPS){
+    if(Math.abs(cross(Z,v))>=EPS)return{kind:"none"};
+    const Y=Math.abs(v[0])>=EPS?0:1,g=(r[Y]-b[Y])/v[Y],z=(f.to[Y]-b[Y])/v[Y];
+    const ce=Math.max(0,Math.min(g,z)),E=Math.min(1,Math.max(g,z));
+    if(ce>E+EPS)return{kind:"none"};
+    if(Math.abs(ce-E)<EPS)return{kind:"point",point:[b[0]+ce*v[0],b[1]+ce*v[1]]};
+    return{kind:"collinear"};
+  }
+  const H=cross(Z,A)/M,J=cross(Z,v)/M;
+  if(H>=-EPS&&H<=1+EPS&&J>=-EPS&&J<=1+EPS)return{kind:"point",point:[b[0]+H*v[0],b[1]+H*v[1]]};
+  return{kind:"none"};
+}
+const polyArea=s=>Math.abs(s.reduce((f,b,r)=>{const v=s[(r+1)%s.length];return f+b[0]*v[1]-v[0]*b[1];},0)/2);
+const signedArea=s=>s.reduce((f,b,r)=>{const v=s[(r+1)%s.length];return f+b[0]*v[1]-v[0]*b[1];},0)/2;
+function buildGraph(segs){
+  const f=segs.map(r=>new Map([[pkey(r.from),r.from],[pkey(r.to),r.to]]));
+  for(let r=0;r<segs.length;r++)for(let v=r+1;v<segs.length;v++){
+    const A=intersect(segs[r],segs[v]);
+    if(A.kind==="point"&&A.point){f[r].set(pkey(A.point),A.point);f[v].set(pkey(A.point),A.point);}
+  }
+  const b=new Map;
+  segs.forEach((r,v)=>{
+    const A=r.to[0]-r.from[0],M=r.to[1]-r.from[1];
+    const Z=[...f[v].values()].sort((H,J)=>{
+      const Y=Math.abs(A)>=EPS?(H[0]-r.from[0])/A:(H[1]-r.from[1])/M;
+      const g=Math.abs(A)>=EPS?(J[0]-r.from[0])/A:(J[1]-r.from[1])/M;
+      return Y-g;
+    });
+    for(let H=0;H<Z.length-1;H++){
+      const J=Z[H],Y=Z[H+1];if(peq(J,Y))continue;
+      const g=pkey(J),z=pkey(Y);
+      if(!b.has(g))b.set(g,{point:J,neighbors:new Set});
+      if(!b.has(z))b.set(z,{point:Y,neighbors:new Set});
+      b.get(g).neighbors.add(z);b.get(z).neighbors.add(g);
+    }
+  });
+  return b;
+}
+function faces(segs){
+  const f=buildGraph(segs),b=new Map;
+  for(const[A,M]of f)b.set(A,[...M.neighbors].sort((Z,H)=>{
+    const J=f.get(Z).point,Y=f.get(H).point;
+    return Math.atan2(J[1]-M.point[1],J[0]-M.point[0])-Math.atan2(Y[1]-M.point[1],Y[0]-M.point[0]);
+  }));
+  const r=new Set,v=[];
+  for(const[A,M]of f)for(const Z of M.neighbors){
+    const H=`${A}>${Z}`;if(r.has(H))continue;
+    let J=A,Y=Z;const g=[];
+    while(!r.has(`${J}>${Y}`)){
+      r.add(`${J}>${Y}`);g.push(f.get(J).point);
+      const z=b.get(Y),ce=z.indexOf(J),E=z[(ce-1+z.length)%z.length];J=Y;Y=E;
+    }
+    if(`${J}>${Y}`===H&&signedArea(g)>EPS)v.push(g);
+  }
+  return v;
+}
+function pointInPoly(p,poly){
+  let inside=false;
+  for(let r=0;r<poly.length;r++){
+    const v=poly[r],A=poly[(r+1)%poly.length];
+    if(onSeg(p,{from:v,to:A}))return false;
+    if((v[1]>p[1])!==(A[1]>p[1])&&v[0]+(p[1]-v[1])*(A[0]-v[0])/(A[1]-v[1])>p[0])inside=!inside;
+  }
+  return inside;
+}
+function territoriesFor(segs){
+  const parent=segs.map((_,i)=>i);
+  const find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+  const union=(a,b)=>{const ra=find(a),rb=find(b);if(ra!==rb)parent[rb]=ra;};
+  for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++)
+    if(intersect(segs[i],segs[j]).kind!=="none")union(i,j);
+  const comps=new Map;
+  segs.forEach((s,i)=>{const k=find(i);comps.set(k,[...(comps.get(k)||[]),s]);});
+  const list=[...comps.values()].map(c=>({probe:c[0].from,faces:faces(c)})).filter(c=>c.faces.length);
+  return list.flatMap((c,i)=>list.some((o,j)=>i!==j&&o.faces.some(f=>pointInPoly(c.probe,f)))?[]:c.faces);
+}
+function computeTerritories(segs){
+  const t={blue:territoriesFor(segs.blue),red:territoriesFor(segs.red)};
+  return{territories:t,areas:{
+    blue:round(t.blue.reduce((a,p)=>a+polyArea(p),0)),
+    red:round(t.red.reduce((a,p)=>a+polyArea(p),0))}};
+}
+
+/* ================= game state & rules ================= */
+const clone=o=>(typeof structuredClone==="function"?structuredClone(o):JSON.parse(JSON.stringify(o)));
+function initialState(){
+  return{
+    boardSize:19,placeRadius:3,turn:"blue",moveNumber:0,lineLimit:120,actionsRemaining:1,
+    nodes:{blue:[[0,9],[3,9]],red:[[18,9],[15,9]]},
+    segments:{blue:[{from:[0,9],to:[3,9],invincible:false}],red:[{from:[18,9],to:[15,9],invincible:false}]},
+    territories:{blue:[],red:[]},scores:{blue:0,red:0},areas:{blue:0,red:0},currentTurnEdges:[]
+  };
+}
+function validateMove(st,from,to){
+  if(st.moveNumber>=st.lineLimit)return"The game is complete.";
+  const v=st.turn,A=v==="blue"?"red":"blue";
+  if(!st.nodes[v].some(g=>peq(g,from)))return"Start from one of your existing nodes.";
+  if(peq(from,to))return"Choose a different endpoint.";
+  if(to.some(g=>g<0||g>=st.boardSize))return"That point is outside the board.";
+  if(Math.abs(to[0]-from[0])>st.placeRadius||Math.abs(to[1]-from[1])>st.placeRadius)return`Stay within the ${st.placeRadius}-unit placement box.`;
+  const M={from:[...from],to:[...to]};
+  if(st.segments[v].some(g=>intersect(M,g).kind==="collinear"))return"A segment cannot overlap one of your own lines.";
+  if([from,to].some(g=>st.segments[v].some(z=>onSeg(g,z)&&!peq(g,z.from)&&!peq(g,z.to))))return"A node cannot be placed on one of your own edges.";
+  if(st.nodes[v].some(g=>onSeg(g,M)&&!peq(g,M.from)&&!peq(g,M.to)))return"An edge cannot be placed through one of your own nodes.";
+  const Z=st.segments[A].filter(g=>intersect(M,g).kind!=="none");
+  if(Z.some(g=>g.invincible))return"That segment would cross an invincible line.";
+  if(Z.length>1)return"A segment can cut at most one enemy line.";
+  return"";
+}
+function applyMove(state,from,to){
+  const err=validateMove(state,from,to);if(err)throw new Error(err);
+  const r=clone(state),v=r.turn,A=v==="blue"?"red":"blue";
+  const M={from:[...from],to:[...to],invincible:true};
+  const Z=r.segments[A].filter(g=>intersect(M,g).kind!=="none");
+  const H=new Set(r.nodes[A].filter(g=>r.segments[A].some(z=>onSeg(g,z))).map(pkey));
+  r.segments[A]=r.segments[A].filter(g=>!Z.some(z=>segEq(g,z)));
+  r.nodes[A]=r.nodes[A].filter(g=>!H.has(pkey(g))||r.segments[A].some(z=>onSeg(g,z)));
+  for(const g of[from,to])if(!r.nodes[v].some(z=>peq(z,g)))r.nodes[v].push([...g]);
+  r.segments[v].push(M);r.currentTurnEdges.push(M);
+  r.moveNumber+=1;r.actionsRemaining-=1;
+  const J=r.actionsRemaining<=0||r.moveNumber>=r.lineLimit;
+  if(J){
+    for(const z of["blue","red"])r.segments[z].forEach(ce=>{ce.invincible=false;});
+    const g=[...r.currentTurnEdges];
+    for(const z of r.segments[v]){const ce=g.findIndex(E=>segEq(z,E));if(ce>=0){z.invincible=true;g.splice(ce,1);}}
+  }
+  const Y=computeTerritories(r.segments);r.territories=Y.territories;r.areas=Y.areas;
+  if(J){
+    r.scores.blue=round(r.scores.blue+r.areas.blue);r.scores.red=round(r.scores.red+r.areas.red);
+    r.currentTurnEdges=[];r.turn=A;r.actionsRemaining=Math.min(2,r.lineLimit-r.moveNumber);
+  }
+  return r;
+}
+function applyPass(state){
+  if(state.moveNumber>=state.lineLimit)throw new Error("The game is complete.");
+  const f=clone(state),b=f.turn==="blue"?"red":"blue";
+  f.moveNumber+=f.actionsRemaining;
+  for(const A of["blue","red"])f.segments[A].forEach(M=>{M.invincible=false;});
+  const r=[...f.currentTurnEdges];
+  for(const A of f.segments[f.turn]){const M=r.findIndex(Z=>segEq(A,Z));if(M>=0){A.invincible=true;r.splice(M,1);}}
+  const v=computeTerritories(f.segments);f.territories=v.territories;f.areas=v.areas;
+  f.scores.blue=round(f.scores.blue+f.areas.blue);f.scores.red=round(f.scores.red+f.areas.red);
+  f.currentTurnEdges=[];f.turn=b;f.actionsRemaining=Math.min(2,f.lineLimit-f.moveNumber);
+  return f;
+}
+const isGameOver=()=>state.moveNumber>=state.lineLimit;
+function winner(){
+  if(state.scores.blue>state.scores.red)return"Blue";
+  if(state.scores.red>state.scores.blue)return"Red";
+  return"Draw";
+}
+const en=s=>Number.isInteger(s)?String(s):s.toFixed(2).replace(/0+$/,"").replace(/\.$/,"");
+
+/* ================= networking (PeerJS / WebRTC) ================= */
+const rtcConfig={iceServers:[
+  {urls:"stun:stun.l.google.com:19302"},
+  {urls:"stun:global.stun.twilio.com:3478"},
+  {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
+]};
+const ALPHABET="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const genCode=()=>Array.from({length:5},()=>ALPHABET[Math.floor(Math.random()*ALPHABET.length)]).join("");
+const ID_PREFIX="enclosure-v1-";
+const inviteLink=code=>location.href.split("?")[0].split("#")[0]+"?room="+code;
+
+let net={peer:null,conn:null,role:null,myColor:null,roomCode:"",connected:false};
+const netOK=()=>net.conn&&net.conn.open;
+function friendlyPeerError(err){
+  switch(err&&err.type){
+    case"peer-unavailable":return"Room not found. Check the code (or the host closed the game).";
+    case"network":case"server-error":case"socket-error":case"socket-closed":return"Can't reach the matchmaking server. Check your connection and try again.";
+    case"browser-incompatible":return"This browser doesn't support WebRTC.";
+    default:return(err&&err.message)||"Connection error.";
+  }
+}
+function cleanupNet(){
+  try{net.conn&&net.conn.close();}catch(e){}
+  try{net.peer&&net.peer.destroy();}catch(e){}
+  net={peer:null,conn:null,role:null,myColor:null,roomCode:"",connected:false};
+}
+function attachConnection(conn){
+  net.conn=conn;
+  conn.on("open",()=>{
+    net.connected=true;
+    if(net.role==="host")conn.send({t:"state",state});
+    enterGame();
+    render();
+  });
+  conn.on("data",onNetData);
+  conn.on("close",()=>{net.connected=false;error="Opponent disconnected.";render();});
+  conn.on("error",()=>{net.connected=false;render();});
+}
+function onNetData(d){
+  if(net.role==="host"){
+    if(d.t==="move"){
+      try{state=applyMove(state,d.from,d.to);error="";selected=null;render();net.conn.send({t:"state",state});}
+      catch(e){net.conn.send({t:"reject",reason:e.message});}
+    }else if(d.t==="pass"){
+      try{state=applyPass(state);error="";selected=null;render();net.conn.send({t:"state",state});}
+      catch(e){net.conn.send({t:"reject",reason:e.message});}
+    }
+  }else{
+    if(d.t==="state"){state=d.state;selected=null;hover=null;error="";render();}
+    else if(d.t==="reject"){error=d.reason||"Move rejected.";render();}
+  }
+}
+
+/* ================= views ================= */
+const homeView=document.getElementById("home-view"),
+      lobbyView=document.getElementById("lobby-view"),
+      gameView=document.getElementById("game-view");
+function showView(v){
+  homeView.hidden=v!=="home";
+  lobbyView.hidden=v!=="lobby";
+  gameView.hidden=v!=="game";
+}
+function enterGame(){showView("game");document.getElementById("net-bar").hidden=(mode!=="online");render();}
+
+let mode=null; /* 'local' | 'online' */
+let state=initialState(),history=[],selected=null,hover=null,error="";
+
+function startLocal(){
+  cleanupNet();mode="local";state=initialState();history=[];selected=null;hover=null;error="";
+  enterGame();
+}
+let hostAttempts=0;
+function startHost(){
+  if(typeof Peer==="undefined"){document.getElementById("home-error").textContent="PeerJS failed to load — check your internet connection and reload.";return;}
+  cleanupNet();mode="online";state=initialState();history=[];selected=null;hover=null;error="";
+  net.role="host";net.myColor="blue";
+  showView("lobby");
+  document.getElementById("lobby-error").textContent="";
+  tryHost();
+}
+function tryHost(){
+  const code=genCode();net.roomCode=code;
+  const peer=new Peer(ID_PREFIX+code,{config:rtcConfig});
+  net.peer=peer;
+  peer.on("open",()=>{
+    hostAttempts=0;
+    document.getElementById("lobby-code").textContent=code;
+    document.getElementById("lobby-link").textContent=inviteLink(code);
+  });
+  peer.on("connection",conn=>{
+    if(netOK()){try{conn.close();}catch(e){}return;} /* one guest only */
+    attachConnection(conn);
+  });
+  peer.on("disconnected",()=>{try{peer.reconnect();}catch(e){}});
+  peer.on("error",err=>{
+    if(err.type==="unavailable-id"&&hostAttempts<5){hostAttempts++;try{peer.destroy();}catch(e){}tryHost();return;}
+    document.getElementById("lobby-error").textContent=friendlyPeerError(err);
+  });
+}
+let joinTimer=null;
+function joinRoom(raw){
+  const code=(raw||"").trim().toUpperCase();
+  if(!code)return;
+  if(typeof Peer==="undefined"){document.getElementById("home-error").textContent="PeerJS failed to load — check your internet connection and reload.";return;}
+  cleanupNet();mode="online";state=initialState();history=[];selected=null;hover=null;error="";
+  net.role="guest";net.myColor="red";net.roomCode=code;
+  const joinBtn=document.getElementById("join-btn");joinBtn.disabled=true;
+  document.getElementById("home-error").textContent="Connecting…";
+  const peer=new Peer(undefined,{config:rtcConfig});
+  net.peer=peer;
+  peer.on("open",()=>{
+    const conn=peer.connect(ID_PREFIX+code,{reliable:true});
+    attachConnection(conn);
+    joinTimer=setTimeout(()=>{
+      if(!net.connected){
+        document.getElementById("home-error").textContent="Could not reach that room. The host may have left.";
+        cleanupNet();mode=null;joinBtn.disabled=false;showView("home");
+      }
+    },15000);
+  });
+  peer.on("error",err=>{
+    if(net.connected)return;
+    clearTimeout(joinTimer);
+    document.getElementById("home-error").textContent=friendlyPeerError(err);
+    cleanupNet();mode=null;joinBtn.disabled=false;showView("home");
+  });
+}
+function leaveOnline(){
+  clearTimeout(joinTimer);
+  cleanupNet();mode=null;state=initialState();history=[];selected=null;hover=null;error="";
+  document.getElementById("join-btn").disabled=false;
+  document.getElementById("home-error").textContent="";
+  showView("home");
+}
+
+/* ================= rendering & input ================= */
+const MARGIN=24,SIZE=504,STEP=SIZE/18,TOTAL=SIZE+MARGIN*2,R=3;
+const sx=x=>MARGIN+x*STEP, sy=y=>MARGIN+(18-y)*STEP;
+const svg=document.getElementById("board");
+
+function toGrid(evt){
+  const ctm=svg.getScreenCTM();if(!ctm)return null;
+  const pt=svg.createSVGPoint();pt.x=evt.clientX;pt.y=evt.clientY;
+  const p=pt.matrixTransform(ctm.inverse());
+  const gx=Math.round((p.x-MARGIN)/STEP),gy=Math.round(18-(p.y-MARGIN)/STEP);
+  if(gx<0||gx>18||gy<0||gy>18)return null;
+  if(Math.hypot(p.x-sx(gx),p.y-sy(gy))>12)return null;
+  return[gx,gy];
+}
+function myTurn(){
+  if(isGameOver())return false;
+  if(mode==="local")return true;
+  return netOK()&&state.turn===net.myColor;
+}
+svg.addEventListener("click",e=>{
+  if(!myTurn())return;
+  const p=toGrid(e);if(!p)return;
+  const turn=state.turn,isNode=state.nodes[turn].some(n=>peq(n,p));
+  if(!selected){if(isNode){selected=p;error="";}render();return;}
+  if(peq(selected,p)){selected=null;render();return;}
+  const bad=validateMove(state,selected,p);
+  if(bad){error=bad;render();return;}
+  if(mode==="local"){
+    history.push(clone(state));
+    state=applyMove(state,selected,p);selected=null;hover=null;error="";
+  }else if(net.role==="host"){
+    state=applyMove(state,selected,p);selected=null;hover=null;error="";
+    netOK()&&net.conn.send({t:"state",state});
+  }else{ /* guest: send, host validates & echoes state */
+    netOK()&&net.conn.send({t:"move",from:selected,to:p});
+    selected=null;error="";
+  }
+  render();
+});
+svg.addEventListener("mousemove",e=>{const p=toGrid(e);if(p&&(!hover||!peq(hover,p))){hover=p;if(selected)render();}});
+svg.addEventListener("mouseleave",()=>{hover=null;if(selected)render();});
+
+function render(){
+  const t=state.turn;
+  let out=`<rect width="${TOTAL}" height="${TOTAL}" class="board-background"/>`;
+  for(const c of["blue","red"])(state.territories[c]||[]).forEach(poly=>{
+    out+=`<polygon points="${poly.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" ")}" class="territory ${c}"/>`;
+  });
+  for(let i=0;i<19;i++){const p=MARGIN+i*STEP;
+    out+=`<line x1="${MARGIN}" y1="${p}" x2="${MARGIN+SIZE}" y2="${p}" class="grid"/>`;
+    out+=`<line x1="${p}" y1="${MARGIN}" x2="${p}" y2="${MARGIN+SIZE}" class="grid"/>`;}
+  if(selected){
+    const x0=Math.max(0,selected[0]-R),x1=Math.min(18,selected[0]+R),
+          y0=Math.max(0,selected[1]-R),y1=Math.min(18,selected[1]+R);
+    out+=`<rect x="${sx(x0)}" y="${sy(y1)}" width="${sx(x1)-sx(x0)}" height="${sy(y0)-sy(y1)}" class="range-square"/>`;
+  }
+  for(const c of["blue","red"])state.segments[c].forEach(s=>{if(s.invincible)
+    out+=`<line x1="${sx(s.from[0])}" y1="${sy(s.from[1])}" x2="${sx(s.to[0])}" y2="${sy(s.to[1])}" class="segment-halo ${c}"/>`;});
+  for(const c of["blue","red"])state.segments[c].forEach(s=>
+    out+=`<line x1="${sx(s.from[0])}" y1="${sy(s.from[1])}" x2="${sx(s.to[0])}" y2="${sy(s.to[1])}" class="segment ${c}${s.invincible?" invincible":""}"/>`);
+  if(selected&&hover&&!peq(selected,hover)){
+    const bad=validateMove(state,selected,hover);
+    out+=`<line x1="${sx(selected[0])}" y1="${sy(selected[1])}" x2="${sx(hover[0])}" y2="${sy(hover[1])}" class="preview ${bad?"invalid":t}"/>`;
+  }
+  for(const c of["blue","red"])state.nodes[c].forEach(n=>
+    out+=`<circle cx="${sx(n[0])}" cy="${sy(n[1])}" r="4.5" class="node ${c}${myTurn()&&c===t?" selectable":""}"/>`);
+  if(selected)out+=`<circle cx="${sx(selected[0])}" cy="${sy(selected[1])}" r="10" class="selection"/>`;
+  svg.innerHTML=out;
+  updateHUD();
+}
+function updateHUD(){
+  const t=state.turn;
+  const tb=document.getElementById("turn-badge");
+  tb.textContent=t==="blue"?"Blue":"Red";tb.className="badge "+t;
+  document.getElementById("move-count").textContent=`${state.moveNumber} / ${state.lineLimit}`;
+  document.getElementById("lines-left").textContent=state.actionsRemaining;
+  document.getElementById("blue-score").textContent=en(state.scores.blue);
+  document.getElementById("red-score").textContent=en(state.scores.red);
+  document.getElementById("blue-gain").textContent=`+${en(state.areas.blue)} this turn`;
+  document.getElementById("red-gain").textContent=`+${en(state.areas.red)} this turn`;
+  document.getElementById("blue-name").textContent="Blue"+(mode==="online"?(net.myColor==="blue"?" (you)":" (opponent)"):"");
+  document.getElementById("red-name").textContent="Red"+(mode==="online"?(net.myColor==="red"?" (you)":" (opponent)"):"");
+  document.getElementById("error").textContent=error;
+
+  const passBtn=document.getElementById("pass-btn"),
+        undoBtn=document.getElementById("undo-btn"),
+        resetBtn=document.getElementById("reset-btn");
+  passBtn.disabled=!myTurn();
+  if(mode==="online"){
+    undoBtn.hidden=true;
+    resetBtn.hidden=(net.role!=="host");
+    resetBtn.textContent="New game";
+  }else{
+    undoBtn.hidden=false;
+    resetBtn.hidden=false;
+    resetBtn.textContent="Reset";
+    undoBtn.disabled=!history.length;
+  }
+  const hint=document.getElementById("hint");
+  if(mode==="online"&&!netOK())hint.textContent="Opponent disconnected. You can leave and start a new game.";
+  else if(!myTurn()&&!isGameOver())hint.textContent=mode==="online"?"Waiting for your opponent's move…":"It's the other player's turn.";
+  else hint.textContent="Click one of your glowing nodes, then click a point within the box to draw a line.";
+
+  const info=document.getElementById("net-info");
+  if(mode==="online"){
+    info.innerHTML=netOK()
+      ?`You are <code>${net.myColor==="blue"?"Blue":"Red"}</code> · Room <code>${net.roomCode}</code> · Connected`
+      :`You are <code>${net.myColor==="blue"?"Blue":"Red"}</code> · Room <code>${net.roomCode}</code> · Disconnected`;
+  }
+
+  const ov=document.getElementById("overlay");
+  if(isGameOver()){
+    const w=winner();
+    let title=w==="Draw"?"Draw!":`${w} wins`;
+    if(mode==="online"&&w!=="Draw")title+=(w.toLowerCase()===net.myColor)?"You win! 🎉":"You lose";
+    document.getElementById("ov-title").textContent=title;
+    document.getElementById("ov-score").textContent=`Blue ${en(state.scores.blue)} — ${en(state.scores.red)} Red`;
+    const canAgain=mode==="local"||net.role==="host";
+    document.getElementById("ov-reset").hidden=!canAgain;
+    document.getElementById("ov-wait").hidden=canAgain;
+    ov.classList.remove("hidden");
+  }else ov.classList.add("hidden");
+}
+
+/* ================= buttons ================= */
+document.getElementById("local-btn").addEventListener("click",startLocal);
+document.getElementById("host-btn").addEventListener("click",startHost);
+document.getElementById("join-btn").addEventListener("click",()=>joinRoom(document.getElementById("join-code").value));
+document.getElementById("join-code").addEventListener("keydown",e=>{if(e.key==="Enter")joinRoom(e.target.value);});
+document.getElementById("cancel-host-btn").addEventListener("click",leaveOnline);
+document.getElementById("leave-btn").addEventListener("click",leaveOnline);
+
+document.getElementById("copy-link-btn").addEventListener("click",function(){
+  navigator.clipboard.writeText(inviteLink(net.roomCode)).then(()=>{this.textContent="Copied!";setTimeout(()=>this.textContent="Copy invite link",1500);});
+});
+document.getElementById("copy-link-game-btn").addEventListener("click",function(){
+  navigator.clipboard.writeText(inviteLink(net.roomCode)).then(()=>{this.textContent="Copied!";setTimeout(()=>this.textContent="Copy invite",1500);});
+});
+
+document.getElementById("pass-btn").addEventListener("click",()=>{
+  if(!myTurn())return;
+  if(mode==="local"){history.push(clone(state));state=applyPass(state);selected=null;hover=null;error="";}
+  else if(net.role==="host"){try{state=applyPass(state);error="";netOK()&&net.conn.send({t:"state",state});}catch(e){error=e.message;}}
+  else{netOK()&&net.conn.send({t:"pass"});}
+  selected=null;render();
+});
+document.getElementById("undo-btn").addEventListener("click",()=>{
+  if(mode!=="local"||!history.length)return;
+  state=history.pop();selected=null;hover=null;error="";render();
+});
+function newGame(){
+  state=initialState();history=[];selected=null;hover=null;error="";
+  if(mode==="online"&&net.role==="host"&&netOK())net.conn.send({t:"state",state});
+  render();
+}
+document.getElementById("reset-btn").addEventListener("click",()=>{
+  if(mode==="online"&&net.role!=="host")return;
+  newGame();
+});
+document.getElementById("ov-reset").addEventListener("click",()=>{
+  if(mode==="online"&&net.role!=="host")return;
+  newGame();
+});
+
+/* ================= boot ================= */
+const urlRoom=new URLSearchParams(location.search).get("room");
+if(urlRoom)document.getElementById("join-code").value=urlRoom.toUpperCase();
+showView("home");
+</script>
+</body>
+</html>
